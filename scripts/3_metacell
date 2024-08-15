@@ -1,0 +1,171 @@
+# Generate Metacell from adnp.male first
+library(metacell)
+
+if(!dir.exists("testdb")) dir.create("testdb/")
+scdb_init("testdb/", force_reinit=T)
+if(!dir.exists("figs")) dir.create("figs/")
+scfigs_init("figs/")
+celllines = names(which(table(adnp.male$orig.ident) > 0))
+for(l in celllines){
+  mat.name = l
+  mat = scm_import_sce_to_mat(as.SingleCellExperiment(adnp.male[, adnp.male$orig.ident == l]), counts_slot = 'counts')
+  dim(mat@mat)
+  
+  scdb_add_mat(mat.name, mat)
+  mcell_plot_umis_per_cell(mat.name)
+  mat = scdb_mat(mat.name)
+  nms = c(rownames(mat@mat), rownames(mat@ignore_gmat))
+  ig_genes = c(grep("^IGJ", nms, v=T), 
+               grep("^IGH",nms,v=T),
+               grep("^IGK", nms, v=T), 
+               grep("^IGL", nms, v=T))
+  bad_genes = unique(c(grep("^MT-", nms, v=T), grep("^MTMR", nms, v=T), grep("^MTND", nms, v=T),"NEAT1","TMSB4X", "TMSB10", ig_genes))
+  bad_genes
+  mcell_mat_ignore_genes(new_mat_id= mat.name, mat_id = mat.name, bad_genes, reverse=F) 
+  
+  mcell_mat_ignore_small_cells(mat.name, mat.name, 800)
+  mcell_add_gene_stat(gstat_id=mat.name, mat_id=mat.name, force=T)
+  mcell_gset_filter_varmean(gset_id= paste0(mat.name, "_feats"), gstat_id=mat.name, T_vm=0.08, force_new=T)
+  mcell_gset_filter_cov(gset_id = paste0(mat.name, "_feats"), gstat_id=mat.name, T_tot=100, T_top3=2)
+  mcell_plot_gstats(gstat_id=mat.name, gset_id=paste0(mat.name, "_feats"))
+  mcell_add_cgraph_from_mat_bknn(mat_id=mat.name, 
+                                 gset_id = paste0(mat.name, "_feats"), 
+                                 graph_id=paste0(mat.name, "_graph"),
+                                 K=50,
+                                 dsamp=T)
+  
+  mcell_coclust_from_graph_resamp(
+    coc_id=paste0(mat.name, "_coc500"), 
+    graph_id=paste0(mat.name, "_graph"),
+    min_mc_size=10, 
+    p_resamp=0.75, n_resamp=500)
+  mcell_mc_from_coclust_balanced(
+    coc_id=paste0(mat.name, "_coc500"), 
+    mat_id= mat.name,
+    mc_id= paste0(mat.name, "_mc"), 
+    K=20, min_mc_size=15, alpha=2)
+  mcell_plot_outlier_heatmap(mc_id=paste0(mat.name, "_mc"), mat_id = mat.name, T_lfc=3)
+  
+  mcell_mc_split_filt(new_mc_id=paste0(mat.name, "_mc_f"), 
+                      mc_id=paste0(mat.name, "_mc"), 
+                      mat_id=mat.name ,
+                      T_lfc=3, plot_mats=F)
+  
+  mcell_gset_from_mc_markers(gset_id=paste0(mat.name, "_markers"), mc_id=paste0(mat.name, "_mc_f"))
+  mc = scdb_mc(paste0(mat.name, "_mc_f"))
+  
+  lfp = log2(mc@mc_fp)
+  
+  mc_hc = mcell_mc_hclust_confu(mc_id= paste0(mat.name, "_mc_f"), graph_id=paste0(mat.name, "_graph"))
+  mc_sup = mcell_mc_hierarchy(mc_id=paste0(mat.name, "_mc_f"),
+                              mc_hc=mc_hc, T_gap=0.04)
+  mcell_mc_plot_hierarchy(mc_id= paste0(mat.name, "_mc_f"), 
+                          graph_id=paste0(mat.name, "_graph"), 
+                          mc_order=mc_hc$order, 
+                          sup_mc = mc_sup, 
+                          width=2800, heigh=2000, min_nmc=2)
+}
+
+meta.celllines = NULL
+for(l in celllines){
+  load(paste0('./testdb/mc.', l, '_mc.Rda'))
+  temp = adnp.male@meta.data[match(names(object@mc), colnames(adnp.male)), ]
+  temp$mc = paste(l, object@mc, sep = '.')
+  meta.celllines = rbind(meta.celllines, temp)
+}
+hist(table(meta.celllines$mc))
+
+a = table(meta.celllines$mc, meta.celllines$seurat_clusters)
+u.mc.names = rownames(a)
+ra = which(a <=  5 & a > 0, arr.ind = T)
+b = NULL
+for(i in 1:nrow(ra)){
+  b = c(b, which(meta.celllines$mc == u.mc.names[ra[i, 1]] & meta.celllines$seurat_clusters == ra[i, 2]-1))
+}
+meta.celllines = meta.celllines[-b, ]
+
+u.mc.names = unique(meta.celllines$mc) # 1046 cells
+a = table(meta.celllines$mc, meta.celllines$seurat_clusters)
+
+# get only the adnp.male.sub this part
+meta.celllines = meta.celllines[intersect(rownames(meta.celllines), colnames(adnp.male.sub)), ]
+a = table(meta.celllines$mc, meta.celllines$seurat_clusters)
+u.mc.names = unique(meta.celllines$mc) 
+
+mc.name.temp = data.frame(mc = rownames(which(a > 0, arr.ind = T)), seurat_clusters = which(a>0, arr.ind = T)[, 2]-1)
+umap.coord.male = umap.coord.male@cell.embeddings
+
+mc.counts = NULL;
+meta.mc = NULL;
+umap.mc.embedding = NULL;
+
+meta.mc = do.call('rbind', lapply(1:nrow(mc.name.temp), function(i){
+  u.id = rownames(meta.celllines)[meta.celllines$seurat_clusters == mc.name.temp$seurat_clusters[i] & 
+                                    meta.celllines$mc == mc.name.temp$mc[i]]
+  meta.temp = cbind(meta.celllines[u.id[1], c('orig.ident', 'background', 'genotype', 'seurat_clusters', 'mc')], 
+                    pseudotime = mean(meta.celllines[u.id, ]$pseudotime))
+}))
+
+
+umap.mc.embedding = do.call('rbind', lapply(1:nrow(mc.name.temp), function(i){
+  u.id = rownames(meta.celllines)[meta.celllines$seurat_clusters == mc.name.temp$seurat_clusters[i] & 
+                                    meta.celllines$mc == mc.name.temp$mc[i]]
+  colMeans(umap.coord.male[u.id, ])
+}))
+
+# In total: there are 952 metacells for the next step
+rownames(meta.mc) = paste(mc.name.temp[, 1], mc.name.temp[, 2], sep = '_')
+rownames(umap.mc.embedding) = paste(mc.name.temp[, 1], mc.name.temp[, 2], sep = '_')
+
+df.meta.mc = cbind(meta.mc, umap_1 = umap.mc.embedding[, 1], umap_2 = umap.mc.embedding[, 2])
+gg.a = ggplot(df.meta.mc, aes(umap_1, umap_2, color = seurat_clusters)) + geom_point(size = 0.8) + 
+  ggtitle('Clusters')
+gg.b = ggplot(df.meta.mc, aes(umap_1, umap_2, color = genotype)) + geom_point(size = 0.8) + 
+  ggtitle('Genotype') + scale_color_brewer(palette = 'Set1')
+gg.c = ggplot(df.meta.mc, aes(umap_1, umap_2, color = background)) + geom_point(size = 0.8) + 
+  ggtitle('Background') + scale_color_brewer(palette = 'Set2')
+gg.d = ggplot(df.meta.mc, aes(umap_1, umap_2, color = pseudotime)) + geom_point(size = 0.8) + 
+  scale_color_viridis(option="inferno") + ggtitle('Pseudotime')
+pdf('plots/UMAp_metacell_comb.pdf', width = 10, height = 7)
+plot_grid(gg.a, gg.b, gg.c, gg.d)
+dev.off()
+
+adnp.male.counts = adnp.male@assays$RNA$counts
+mc.counts = NULL
+for(k in 1:10){
+  idx = ((k-1)*100 + 1):min(k*100, nrow(mc.name.temp))
+  temp = do.call('cbind', lapply(idx, function(i){
+    u.id = rownames(meta.celllines)[meta.celllines$seurat_clusters == mc.name.temp$seurat_clusters[i] & 
+                                      meta.celllines$mc == mc.name.temp$mc[i]]
+    Matrix::rowSums(adnp.male.counts[, u.id])
+  }))
+  temp = Matrix(temp, sparse = TRUE)
+  mc.counts = cbind(mc.counts, temp)
+  cat(k, '\t')
+}
+
+colnames(mc.counts) = paste(mc.name.temp[, 1], mc.name.temp[, 2], sep = '_')
+
+save(meta.mc, mc.counts, umap.mc.embedding, file = 'Data_store/metacell_datastore.RData')
+adnp.mc.seu = CreateSeuratObject(counts = mc.counts, assay = 'RNA', meta.data = meta.mc)
+VlnPlot(adnp.mc.seu, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+adnp.mc.seu <- NormalizeData(adnp.mc.seu, normalization.method = "LogNormalize", scale.factor = 10000)
+adnp.mc.seu <- FindVariableFeatures(adnp.mc.seu, selection.method = "vst", nfeatures = 2000)
+
+top10 <- head(VariableFeatures(adnp.mc.seu), 10)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(adnp.mc.seu)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+
+all.genes <- rownames(adnp.mc.seu)
+adnp.mc.seu <- ScaleData(adnp.mc.seu, features = all.genes)
+umap.mc.coord = umap.coord
+umap.mc.coord@cell.embeddings = umap.mc.embedding
+
+adnp.mc.seu@reductions$umap = umap.mc.coord
+saveRDS(adnp.mc.seu, file = 'Data_store/adnp_mc_male_seu.rds')
+
+# Start from here, we turn to WGCNA module detection
+

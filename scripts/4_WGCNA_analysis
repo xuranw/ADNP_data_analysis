@@ -1,0 +1,479 @@
+# WGCNA analysis of the 3 clusters
+library(WGCNA)
+library(Seurat)
+
+adnp.mc.seu = readRDS('Data_store/adnp_mc_male_seu.rds')
+
+# Remove them
+#mitochondrial genes
+mito.genes <- grep(pattern = "^MT-", x = rownames(adnp.mc.seu), value = TRUE)
+#look at ribosomal genes
+RPS.genes <- grep(pattern = "^RPS", x = rownames(adnp.mc.seu), value = TRUE)
+RPL.genes <- grep(pattern = "^RPL", x = rownames(adnp.mc.seu), value = TRUE)
+
+# Remove gene whose gene expression is too low
+gene.names = rownames(adnp.mc.seu)[rowMeans(adnp.mc.seu@assays$RNA$data) >= 0.15]
+gene.names = setdiff(gene.names, c(mito.genes, RPS.genes, RPL.genes))
+# 8516 genes left
+
+counts.cluster0 = adnp.mc.seu@assays$RNA$data[gene.names, adnp.mc.seu$seurat_clusters == 0] # 402 metacells
+counts.cluster1 = adnp.mc.seu@assays$RNA$data[gene.names, adnp.mc.seu$seurat_clusters == 1] # 288 metacells
+counts.cluster2 = adnp.mc.seu@assays$RNA$data[gene.names, adnp.mc.seu$seurat_clusters == 2] # 262 metacells
+
+##### all mc for WGCNA #######
+counts.all = adnp.mc.seu@assays$RNA$data[gene.names, ]
+datExpr = t(data.matrix(counts.all))
+gsg = goodSamplesGenes(datExpr = datExpr, verbose = 3)
+gsg$allOK
+
+sampleTree = hclust(dist(datExpr), method = 'average')
+sizeGrWindow(12, 9)
+par(cex = 0.6)
+par(mar = c(0, 4, 2, 0))
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5, 
+     cex.axis = 1.5, cex.main = 2)
+
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+save(sft, file = 'Data_store/sft_cluster_012.RData')
+
+pdf(paste0('plots/wgcna_sft_power_cluster_012_power12.pdf'), width = 9, height = 5)
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.9,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+dev.off()
+
+power = 3
+net.cluster = blockwiseModules(datExpr, power = power, TOMType = "signed",
+                               deepSplit = 2, maxBlockSize = 9000, 
+                               minModuleSize = 30, 
+                               reassignThreshold = 0, mergeCutHeight = 0.15,
+                               numericLabels = TRUE, pamRespectsDendro = FALSE,
+                               saveTOMs = TRUE, 
+                               saveTOMFileBase = paste0("Data_store/cluster012"), 
+                               verbose = 3)
+merge.modules.cluster = mergeCloseModules(datExpr, colors = net.cluster$colors, MEs = net.cluster$MEs)
+
+
+mergedColors = labels2colors(merge.modules.cluster$colors)
+unmergedColors = labels2colors(net.cluster$colors)
+# Plot the dendrogram and the module colors underneath
+color.mat = cbind(mergedColors, unmergedColors)
+colnames(color.mat) = c('merged', 'unmerged')
+pdf(paste0('plots/Cluster_Dendro_blocks_cluster012_power', power,'.pdf'), width = 12, height = 9)
+plotDendroAndColors(net.cluster$dendrograms[[1]], colors = color.mat,
+                    c("merged", "unmerged"), dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05, 
+                    main = paste0('Cluster012 Dendrogram'))
+dev.off()
+save(net.cluster, mergedColors, file = paste0('Data_store/wgcna_net_cluster012.RData'))
+
+
+############## Get started with WGCNA ###############
+datExpr = t(data.matrix(counts.cluster2))
+gsg = goodSamplesGenes(datExpr = datExpr, verbose = 3)
+gsg$allOK
+sampleTree = hclust(dist(datExpr), method = 'average')
+sizeGrWindow(12, 9)
+par(cex = 0.6)
+par(mar = c(0, 4, 2, 0))
+plot(sampleTree, main = "Sample clustering to detect outliers", sub="", xlab="", cex.lab = 1.5, 
+     cex.axis = 1.5, cex.main = 2)
+
+i = 3
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+save(sft, file = paste0('Data_store/sft_cluster_', i-1,'.RData'))
+
+# Plot the results:
+pdf(paste0('plots/wgcna_sft_power_cluster_', i-1, '_power4.pdf'), width = 9, height = 5)
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+     main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.95,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+     main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+dev.off()
+# cluster 0: power = 4
+# cluster 1: power = 3
+# cluster 2: power = 4
+power = 4
+net.cluster = blockwiseModules(datExpr, power = power, TOMType = "signed",
+                                deepSplit = 2, maxBlockSize = 9000, 
+                                minModuleSize = 30, 
+                                reassignThreshold = 0, mergeCutHeight = 0.15,
+                                numericLabels = TRUE, pamRespectsDendro = FALSE,
+                                saveTOMs = TRUE, 
+                                saveTOMFileBase = paste0("Data_store/cluster_", i-1), 
+                                verbose = 3)
+merge.modules.cluster = mergeCloseModules(datExpr, colors = net.cluster$colors, MEs = net.cluster$MEs)
+
+
+mergedColors = labels2colors(merge.modules.cluster$colors)
+unmergedColors = labels2colors(net.cluster$colors)
+# Plot the dendrogram and the module colors underneath
+color.mat = cbind(mergedColors, unmergedColors)
+colnames(color.mat) = c('merged', 'unmerged')
+pdf(paste0('plots/Cluster_Dendro_blocks_cluster', i-1, '_power', power,'.pdf'), width = 12, height = 9)
+plotDendroAndColors(net.cluster$dendrograms[[1]], colors = color.mat,
+                    c("merged", "unmerged"), dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05, 
+                    main = paste0('Cluster', i-1, ' Dendrogram'))
+dev.off()
+save(net.cluster, mergedColors, file = paste0('Data_store/wgcna_net_cluster', i-1, '.RData'))
+
+
+wgcna.genes = colnames(datExpr)
+save(wgcna.genes, file = 'Data_store/wgcna_genes.RData')
+write.table(wgcna.genes, file = 'Data_store/wgcna_genes.txt', quote = FALSE, row.names = FALSE, col.names = FALSE)
+
+### Correspondence between three clusters
+load('Data_store/wgcna_genes.RData')
+cluster.modules = NULL
+for(i in 1:3){
+  load(paste0('Data_store/wgcna_net_cluster', i-1, '.RData'))
+  cluster.modules = cbind(cluster.modules, mergedColors)
+}
+colnames(cluster.modules) = paste0('Cluster', 0:2)
+rownames(cluster.modules) = wgcna.genes
+# Trajectory flow from 2 - 0 - 1
+
+table(rowSums(cluster.modules == 'grey'))
+#   0    1    2    3 
+# 2133 2250 2112 2021 
+
+# First remove genes that are grey for all clusters
+cluster.modules = cluster.modules[rowSums(cluster.modules == 'grey') < 3, ]
+# 6495 genes remain
+
+table(rowSums(cluster.modules == 'turquoise'))
+#   0    1    2    3 
+# 1023 2836 1614 1022
+
+cluster.modules.no.grey = cluster.modules[rowSums(cluster.modules == 'grey') == 0, ]
+# 2133 genes remain
+table(rowSums(cluster.modules.no.grey == 'turquoise'))
+# We have a big module that stay together for all clusters.
+
+
+# Write all clusters and colors except for grey modules
+for(i in 1:3){
+  x = cluster.modules[, paste0('Cluster', i-1)]
+  color.names = unique(x)
+  color.names = color.names[color.names != 'grey']
+  for(color in color.names){
+    a = names(which(x == color))
+    write.table(a, file = paste0('Data_store/cluster', i-1, '_', color, '.txt'), 
+                quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}
+
+
+# Flow from 2 - 0 - 1
+# Sankey plot
+library(ggsankey)
+df <- data.frame(cluster.modules.no.grey) %>% make_long(Cluster2, Cluster0, Cluster1)
+
+pdf('plots/sankey_plot_gene_module_flow.pdf', width = 12, height = 6)
+ggplot(df, aes(x = x, 
+               next_x = next_x, 
+               node = node, 
+               next_node = next_node,
+               label = node, 
+               fill = factor(node))) +
+  geom_sankey(flow.alpha = 0.75, node.color = 1) +
+  scale_fill_manual(values = levels(factor(df$node))) + 
+  # scale_fill_viridis_d(option = "A", alpha = 0.95) +
+  geom_sankey_label() + 
+  theme_sankey(base_size = 16)
+dev.off()
+
+# The group of genes that flow from turquoise to yellow and then back to turquoise
+# are also interesting to look at.
+load('../LIBD/T21/list_fu_risk_genes.RData') # list.fu
+load('../LIBD/T21/match_gene_names.RData') # temp
+list.fu.new <- lapply(list.fu, function(x){
+  intersect(temp$hgnc_symbol[match(x, temp$ensembl_gene_id)], wgcna.genes)
+})
+
+# ASD: 162; DD: 392; NDD: 534; SCZ: 154
+
+odds.ratio = function(module.list, gene.list){
+  color.names = unique(module.list)
+  color.names = color.names[color.names != 'grey']
+  OR.mat = NULL
+  for(color in color.names){
+    gene.color = names(which(module.list == color))
+    gene.non.color = names(which(module.list != color))
+    a = sum(gene.color %in% gene.list); b = sum(!(gene.color %in% gene.list));
+    c = sum(gene.non.color %in% gene.list); d = sum(!(gene.non.color %in% gene.list));
+    odds1 = a/b; odds2 = c/d; 
+    OR = odds1/odds2; se.log.or = sqrt(1/a + 1/b + 1/c + 1/d)
+    if(OR > 0){
+      CI = exp(c(log(OR) - qnorm(0.975) * se.log.or, log(OR) + qnorm(0.975) * se.log.or))
+      p.val = min( (1 - pnorm(log(OR)/se.log.or))*2, pnorm(log(OR)/se.log.or)*2)
+    }else{
+      CI = c(NA, NA)
+      p.val = NA
+    }
+    OR.mat = rbind(OR.mat, c(OR = OR, CI, p.val))
+  }
+  colnames(OR.mat) = c('OR', 'CI.lower', 'CI.upper', 'p.val')
+  rownames(OR.mat) = color.names
+  OR.mat = cbind(OR.mat, adj_p = p.adjust(OR.mat[, 4]))
+  return(OR.mat)
+}
+
+apply(cluster.modules, 2, odds.ratio, gene.list = list.fu.new$dd)
+# Cluster0: yellow; Cluster1: green, red;
+apply(cluster.modules, 2, odds.ratio, gene.list = list.fu.new$ndd)
+# Cluster0: yellow, brown; Cluster1: red
+
+# Good, wild type does not have any enrichment
+# There are enrichment in cluster0 and cluster 1
+
+list.or.ndd <-apply(cluster.modules, 2, odds.ratio, gene.list = list.fu.new$ndd)
+for(i in 1:3){
+  write.csv(list.or.ndd[[i]], file = paste0('Data_store/ndd_or_cluster', i-1, '.csv'))
+}
+
+list.or.dd <-apply(cluster.modules, 2, odds.ratio, gene.list = list.fu.new$dd)
+for(i in 1:3){
+  write.csv(list.or.ndd[[i]], file = paste0('Data_store/dd_or_cluster', i-1, '.csv'))
+}
+
+#### DE genes
+load('Data_store/de_wilcox_male_comb.RData')
+load('../LIBD/T21/list_fu_risk_genes.RData') # list.fu
+load('../LIBD/T21/match_gene_names.RData') # temp
+list.fu.de <- lapply(list.fu, function(x){
+  intersect(temp$hgnc_symbol[match(x, temp$ensembl_gene_id)], rownames(de.wilcox.male.Homo))
+})
+
+
+deg.mat = rep('none', nrow(de.wilcox.male.Homo))
+names(deg.mat) = rownames(de.wilcox.male.Homo)
+deg.mat[de.wilcox.male$avg_log2FC < -1 & de.wilcox.male$p_val_adj< 0.01] = 'up'
+deg.mat[de.wilcox.male$avg_log2FC > 1 & de.wilcox.male$p_val_adj< 0.01] = 'down'
+
+
+a = lapply(list.fu.de, odds.ratio, module.list = deg.mat)
+for(i in 1:length(a)){
+  write.csv(a[[i]], file = paste0('Data_store/DE_OR_', names(a)[i], '.csv'))
+}
+
+
+for(i in 1:3){
+  load(paste0('Data_store/wgcna_net_cluster', i-1, '.RData'))
+  cluster.modules = cbind(cluster.modules, mergedColors)
+}
+
+
+list.de = list(up = rownames(de.wilcox.male)[de.wilcox.male$avg_log2FC < -1 & de.wilcox.male$p_val_adj< 0.01], 
+               down = rownames(de.wilcox.male)[de.wilcox.male$avg_log2FC > 1 & de.wilcox.male$p_val_adj< 0.01], 
+               all = rownames(de.wilcox.male)[abs(de.wilcox.male$avg_log2FC) > 1 & de.wilcox.male$p_val_adj< 0.01])
+
+list.or.de.up <-apply(cluster.modules, 2, odds.ratio, gene.list = list.de$up)
+for(i in 1:3){
+  write.csv(list.or.de.up[[i]], file = paste0('Data_store/DE_up_or_cluster', i-1, '.csv'))
+}
+list.or.de.down <- apply(cluster.modules, 2, odds.ratio, gene.list = list.de$down)
+for(i in 1:3){
+  write.csv(list.or.de.down[[i]], file = paste0('Data_store/DE_down_or_cluster', i-1, '.csv'))
+}
+
+list.or.de.all <- apply(cluster.modules, 2, odds.ratio, gene.list = list.de$all)
+
+lapply(list.or.de.up, function(x){
+  rownames(x)[which(x[, 5] < 0.05 & x[, 1] > 1)]
+})
+#$Cluster0
+[1] "greenyellow" "magenta"     "red" 
+
+#$Cluster1
+[1] "pink"   "purple" "red"    "brown" 
+
+#$Cluster2
+[1] "yellow"  "blue"  
+lapply(list.or.de.down, function(x){
+  rownames(x)[which(x[, 5] < 0.05 & x[, 1] > 1)]
+})
+#$Cluster0
+[1] "purple" "brown"  "pink"   "red"
+
+#$Cluster1
+[1] "green"       "pink"        "red"         "greenyellow"
+
+#$Cluster2
+[1] "yellow" "brown"  "blue"  
+
+### Get the hub genes 
+# cluster 0: power = 4
+# cluster 1: power = 3
+# cluster 2: power = 4
+
+datExpr = t(data.matrix(counts.cluster2))
+colorh = cluster.modules[, 3]
+
+chooseTopHubInEachModule <- function (datExpr, colorh, omitColors = "grey", power = 2, type = "signed", ...){
+  modules = names(table(colorh))
+  if (!is.na(omitColors)[1]){
+    modules = modules[!is.element(modules, omitColors)]
+  }
+  if (is.null(colnames(datExpr))) {
+    colnames(datExpr) = 1:dim(datExpr)[2]
+    isIndex = TRUE
+    }
+  hubs.relavent = list()
+  hubs = rep(NA, length(modules))
+  names(hubs) = modules
+  for (m in modules) {
+    adj = adjacency(datExpr[, colorh == m], power = power, type = type, ...)
+    hub.r = which(rowSums(adj) > sd( rowSums(adj) ) * 2 + mean( rowSums(adj) ))
+    hubs.relavent[[m]] = colnames(adj)[hub.r]
+    hub = which.max(rowSums(adj))
+    hubs[m] = colnames(adj)[hub]
+  }
+  names(hubs.relavent) = modules
+  return(list(hubs = hubs, hubs.relavent = hubs.relavent))
+}
+
+a0 = chooseTopHubInEachModule(datExpr = t(data.matrix(counts.cluster0)), colorh = cluster.modules[, 1], power = 4)
+a1 = chooseTopHubInEachModule(datExpr = t(data.matrix(counts.cluster1)), colorh = cluster.modules[, 2], power = 3)
+a2 = chooseTopHubInEachModule(datExpr = t(data.matrix(counts.cluster2)), colorh = cluster.modules[, 3], power = 4)
+save(a0, a1, a2, file = 'Data_store/module_hub_genes.RData')
+
+write.csv(a0$hubs.relavent)
+
+
+
+library(igraph)
+# Draw the module 
+# 1. cluster0 - brown
+load('Data_store/wgcna_net_cluster0.RData')
+datExpr = t(data.matrix(counts.cluster0))
+colorh = mergedColors
+m = 'brown'
+power = 4
+type = "signed"
+# MEs0 <- moduleEigengenes(datExpr, mergedColors)$eigengenes
+# sum(abs(cor(MEs0$MEbrown, datExpr)) > 0.7)
+
+adj = adjacency(datExpr[, colorh == m], power = power, type = type)
+diag(adj) = 0
+hub.genes = names(which(rowSums(adj > 0.4) > 1))
+adj.sub = (adj[hub.genes, hub.genes] > 0.4) + 0
+
+network <- graph_from_adjacency_matrix(adj.sub , mode='undirected', diag=F)
+deg <- degree(network, mode="all")
+coul <- brewer.pal(3, "Set2")
+coul[3] = 'grey'
+# [1] "#66C2A5" "#FC8D62" "grey"
+node.color = rep('grey', nrow(adj.sub))
+node.color[deg.mat[rownames(adj.sub)] == 'up'] = coul[1] 
+node.color[deg.mat[rownames(adj.sub)] == 'down'] = coul[2]
+
+
+pdf('plots/networks_wgcna_cluster0_brown.pdf', width = 7, height = 7)
+plot(network, layout=layout.fruchterman.reingold, edge.curved=0.1, vertex.size = log2(deg)*4 + 1, vertex.color = node.color, main="Cluster 0, Brown")
+legend(x= -1.2, y= -0.5, 
+       legend = c('up', 'down', 'none'), 
+       col = coul , 
+       bty = "n", pch=20 , pt.cex = 2, cex = 1, horiz = F)
+dev.off()
+
+# 2. cluster1 - green
+load('Data_store/wgcna_net_cluster1.RData')
+datExpr = t(data.matrix(counts.cluster1))
+colorh = mergedColors
+power = 3
+type = "signed"
+
+m = 'green'
+adj = adjacency(datExpr[, colorh == m], power = power, type = type)
+diag(adj) = 0
+hub.genes = names(which(rowSums(adj > 0.57) > 1))
+adj.sub = (adj[hub.genes, hub.genes] > 0.57) + 0
+
+
+node.color = rep('grey', nrow(adj.sub))
+node.color[deg.mat[rownames(adj.sub)] == 'up'] = coul[1] 
+node.color[deg.mat[rownames(adj.sub)] == 'down'] = coul[2]
+
+network <- graph_from_adjacency_matrix(adj.sub , mode='undirected', diag=F)
+deg <- degree(network, mode="all")
+
+# Plot
+pdf('plots/networks_wgcna_cluster1_green.pdf', width = 7, height = 7)
+plot(network, layout=layout.fruchterman.reingold, vertex.size = log2(deg)*4+1, edge.curved = 0.1, vertex.color = node.color, main="Cluster1, Green")
+legend(x= -1.2, y= -0.2, 
+       legend = c('up', 'down', 'none'), 
+       col = coul , 
+       bty = "n", pch=20 , pt.cex = 2, cex = 1, horiz = F)
+dev.off()
+
+
+# 3. cluster1 - red
+m = 'red'
+adj = adjacency(datExpr[, colorh == m], power = power, type = type)
+diag(adj) = 0
+hub.genes = names(which(rowSums(adj > 0.57) > 1))
+adj.sub = (adj[hub.genes, hub.genes] > 0.57) + 0
+node.color = rep('grey', nrow(adj.sub))
+node.color[deg.mat[rownames(adj.sub)] == 'up'] = coul[1] 
+node.color[deg.mat[rownames(adj.sub)] == 'down'] = coul[2]
+
+
+network <- graph_from_adjacency_matrix(adj.sub , mode='undirected', diag=F)
+deg <- degree(network, mode="all")
+
+pdf('plots/networks_wgcna_cluster1_red.pdf', width = 7, height = 7)
+plot(network, layout=layout.fruchterman.reingold, main="Cluster1, Red", vertex.size = log2(deg)*4+1, vertex.color = node.color, edge.curved = 0.1)
+legend(x= -1.2, y= -0.2, 
+       legend = c('up', 'down', 'none'), 
+       col = coul , 
+       bty = "n", pch=20 , pt.cex = 2, cex = 1, horiz = F)
+dev.off()
+
+# MM: correlation between the gene expression and modules
+
+### Read in SFARI ASD risk genes and SysNDD NDD risk genes. 
+sys.ndd = read_excel(path = 'sysndd_gene_table.xlsx', sheet = 1)
+ndd.risk.genes = intersect(sys.ndd$symbol[sys.ndd$entities_category == 'Definitive'], names(deg.mat))
+
+sfari.mat = read.csv('SFARI-Gene_genes_03-28-2024release_08-15-2024export.csv')
+asd.risk.genes = intersect(sfari.mat$gene.symbol[sfari.mat$syndromic == 1], names(deg.mat))
+
+lapply(list(ndd = ndd.risk.genes, asd = asd.risk.genes), odds.ratio, module.list = deg.mat)
+
+deg.mat = rep('none', nrow(de.wilcox.male.Homo))
+names(deg.mat) = rownames(de.wilcox.male.Homo)
+deg.mat[de.wilcox.male$avg_log2FC < -0.5 & de.wilcox.male$p_val_adj< 0.01] = 'up'
+deg.mat[de.wilcox.male$avg_log2FC > 0.5 & de.wilcox.male$p_val_adj< 0.01] = 'down'
+
+lapply(list(ndd = ndd.risk.genes, asd = asd.risk.genes), odds.ratio, module.list = deg.mat)
+
+lapply(list.fu.de, odds.ratio, module.list = deg.mat)
